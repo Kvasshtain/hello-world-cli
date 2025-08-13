@@ -1,0 +1,11 @@
+[package]
+name = "memo-cli"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+solana-sdk = "=2.1.7"
+solana-client = "=2.1.7"
+tokio = "1.46.1"
+anyhow = "1.0.98"
+solana-transaction-status-client-types = "=2.1.7"
