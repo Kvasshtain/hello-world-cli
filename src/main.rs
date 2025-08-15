@@ -36,9 +36,6 @@ pub fn build_instruction(data: &[u8], transaction_signer_pubkey: Pubkey, account
             AccountMeta::new(transaction_signer_pubkey, true),
             AccountMeta::new(account_to_create_pubkey, false),
             AccountMeta::new_readonly(sys_prg_pubkey, false)]),//accounts_pubkeys
-            // .iter()
-            // .map(|&pubkey| AccountMeta::new_readonly(*pubkey, true))
-            // .collect(),
         data: data.to_vec(),
     }
 }
@@ -53,28 +50,17 @@ async fn main() -> Result<()> {
     println!("Account to create public Key: {}", transaction_signer.pubkey());
 
     // 2: 2nd - account to create
-    let program_id = Pubkey::from_str(PROGRAM_ID)?;
-    let optional_seed = 5;
-    let mut new_pda: Pubkey = Pubkey::new_from_array([0; 32]);
-    let mut pda_is_ok: bool = false;
+    let program_id: &Pubkey = &Pubkey::from_str(PROGRAM_ID)?;
+    let seed_num = 7_u8;
+    let vec = vec![seed_num];
 
-    // Loop through all bump seeds (255 down to 0)
-    for bump in (0..=255).rev() {
-        match Pubkey::create_program_address(&[&[optional_seed], &[bump]], &program_id) {
-            Ok(pda) => {
-                new_pda = pda;
-                pda_is_ok = true;
-                println!("bump: {}", bump);
-                break;
-            },//println!("bump {}: {}", bump, pda),
-            Err(_err) => continue,
-        }
-    }
+    let seed = "hello_world".as_bytes();
 
-    if !pda_is_ok {
-        panic!("Could not find PDA");
-    }
+    let (new_pda_key, bump) = Pubkey::find_program_address(&[seed], &program_id);
 
+    println!("new_pda_key: {}", new_pda_key);
+    println!("seed: {:?}", seed);
+    println!("bump: {}", bump);
 
     // 3: system_program account
     let sys_prg_pubkey = Pubkey::from_str(SYSTEM_PRG_PUBKEY).unwrap();
@@ -95,32 +81,21 @@ async fn main() -> Result<()> {
     );
 
     // data
-    let data: [u8; 2] = [0, optional_seed];
+    let mut data = vec![0];
+    data.extend(seed);
+    let data_slice = data.as_slice();
 
     // create instruction
-    let ix = build_instruction(&data, transaction_signer.pubkey(), new_pda, sys_prg_pubkey);
+    let ix = build_instruction(&data_slice, transaction_signer.pubkey(), new_pda_key, sys_prg_pubkey);
 
     // take a look at purpose of the blockhash:
     // https://solana.com/docs/core/transactions#recent-blockhash
     let blockhash = client.get_latest_blockhash().await?;
 
-
-
-
-    // let message = Message::new(&[ix], Some(&transaction_signer.pubkey()));
-    // // solana tx
-    // let tx = Transaction::new(&[transaction_signer], message, blockhash);
-
-
-
     // solana tx
     let mut tx =
         Transaction::new_with_payer(&[ix], Some(&transaction_signer.pubkey()));
     tx.sign(&[&transaction_signer], blockhash);
-
-
-
-
 
     // let's send it!
     let  sig= client.send_and_confirm_transaction(&tx).await?;
