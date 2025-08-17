@@ -24,7 +24,7 @@ const KEYPAIR_PATH: &str = "/home/kvasshtain/.config/solana/id.json";
 const SOLANA_URL: &str = "http://localhost:8899";
 // program_id of the "memo" program
 // https://github.com/solana-program/memo/blob/37568de8dae6a4e69572a85e8c166910da232b90/program/src/lib.rs#L26
-const PROGRAM_ID: &str = "22Nnm2GqaebkwgFQC95c9ydGp3HZVFbVjrLA5ZBkjKLQ";
+const PROGRAM_ID: &str = "4fnvoc7wADwtwJ9SRUvL7KpCBTp8qztm5GqjZBFP7GTt";
 //System Program account pubkey
 const SYSTEM_PRG_PUBKEY: &str = "11111111111111111111111111111111";
 
@@ -80,9 +80,69 @@ async fn main() -> Result<()> {
         },
     );
 
+
+
+
+
+
+
+
+
+
+
+    // Create account
     // data
-    let mut data = vec![0];
-    data.extend(seed);
+    // let mut data = vec![0];
+    // data.extend(seed);
+    // let data_slice = data.as_slice();
+    //
+    // // create instruction
+    // let ix = build_instruction(&data_slice, transaction_signer.pubkey(), new_pda_key, sys_prg_pubkey);
+    //
+    // // take a look at purpose of the blockhash:
+    // // https://solana.com/docs/core/transactions#recent-blockhash
+    // let blockhash = client.get_latest_blockhash().await?;
+    //
+    // // solana tx
+    // let mut tx =
+    //     Transaction::new_with_payer(&[ix], Some(&transaction_signer.pubkey()));
+    // tx.sign(&[&transaction_signer], blockhash);
+    //
+    // // let's send it!
+    // let  sig= client.send_and_confirm_transaction(&tx).await?;
+    //
+    // println!("we have done it, solana signature: {}", sig);
+    //
+    // let config = RpcTransactionConfig {
+    //     //commitment: CommitmentConfig::finalized().into(), // так не работает
+    //     commitment: CommitmentConfig::confirmed().into(),
+    //     encoding: UiTransactionEncoding::Base64.into(),
+    //     max_supported_transaction_version: Some(0),
+    // };
+    //
+    // let transaction = client.get_transaction_with_config(&sig, config).await?;
+    //
+    // println!("Transaction data is {:#?}", transaction);
+
+
+
+
+
+
+
+
+
+
+
+
+    // Resize account
+    // data
+    let mut data = vec![1];
+
+    let new_size = 5_u64;
+    let new_size_data_arr = new_size.to_le_bytes();
+
+    data.extend(new_size_data_arr);
     let data_slice = data.as_slice();
 
     // create instruction
@@ -112,6 +172,7 @@ async fn main() -> Result<()> {
     let transaction = client.get_transaction_with_config(&sig, config).await?;
 
     println!("Transaction data is {:#?}", transaction);
+
 
     Ok(())
 }
