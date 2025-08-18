@@ -1,12 +1,14 @@
-use std::ptr::null;
-use anyhow::Result;
-use solana_sdk::precompiles::PrecompileError::InvalidPublicKey;
-use solana_sdk::signature::Keypair;
+mod program_option;
+
+use std::{io, process};
+use anyhow::{Result};
+use clap::Parser;
+use solana_sdk::signature::{Keypair, Signature};
+use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
 use {
     solana_client::nonblocking::rpc_client::RpcClient,
     solana_client::rpc_config::RpcTransactionConfig,
     solana_sdk::{
-        message::Message,
         pubkey::Pubkey, instruction::{AccountMeta, Instruction},
         commitment_config::{CommitmentConfig, CommitmentLevel},
         signature::{read_keypair_file, Signer},
@@ -17,6 +19,7 @@ use {
         str::FromStr, path::Path
     },
 };
+use crate::program_option::Args;
 
 // path to keypair
 const KEYPAIR_PATH: &str = "/home/kvasshtain/.config/solana/id.json";
@@ -28,50 +31,185 @@ const PROGRAM_ID: &str = "4fnvoc7wADwtwJ9SRUvL7KpCBTp8qztm5GqjZBFP7GTt";
 //System Program account pubkey
 const SYSTEM_PRG_PUBKEY: &str = "11111111111111111111111111111111";
 
+
+pub fn ask_mode_and_close_if_not_correct() -> u8 {
+    let prg_modes = [0, 1];
+
+    let mut program_mode_input = String::new();
+    println!("Please select mode (0 - Create account, 1 - Resize account): ");
+    let reading_result = io::stdin().read_line(&mut program_mode_input);
+
+    match reading_result{
+        Ok(_size) => {},
+        Err(_err_message) => {
+            println!("Mode isn't supported");
+            process::exit(0);
+        }
+    }
+
+    let program_mode_str = program_mode_input.trim_end();
+    let parsing_result: Result<u8, _> = program_mode_str.parse();
+    let mode: u8;
+
+    match parsing_result{
+        Ok(parsed_mode) => { mode = parsed_mode; },
+        Err(_err_message) => {
+            println!("Mode isn't supported");
+            process::exit(0);
+        }
+    }
+
+    match mode {
+        x if prg_modes.contains(&x) => {},
+        _ => {
+            println!("Mode isn't supported");
+            process::exit(0);
+        },
+    }
+
+    mode
+}
+
+pub fn ask_seed_and_close_if_not_correct() -> Vec<u8> {
+    let mut seed_input: String = String::new();
+    println!("Please enter seed: ");
+    let reading_result = io::stdin().read_line(&mut seed_input);
+
+    match reading_result{
+        Ok(_size) => {},
+        Err(_err_message) => {
+            println!("Seed is incorrect");
+            process::exit(0);
+        }
+    }
+
+    Vec::from(seed_input.trim_end().as_bytes())
+}
+
+pub fn ask_new_size_and_close_if_not_correct() -> u64 {
+    let mut account_new_size_input = String::new();
+    println!("Please enter new account size: ");
+    let reading_result = io::stdin().read_line(&mut account_new_size_input);
+
+    match reading_result{
+        Ok(_size) => {},
+        Err(_err_message) => {
+            println!("Account size is incorrect");
+            process::exit(0);
+        }
+    }
+
+    let parsing_result: Result<u64, _> = account_new_size_input.trim_end().parse();
+
+    let new_size: u64;
+
+    match parsing_result{
+        Ok(parsed_new_size) => { new_size = parsed_new_size; },
+        Err(error) => {
+            println!("Size is incorrect: {}", error);
+            process::exit(0);
+        }
+    }
+
+    new_size
+}
+
 // create instuction of the memo-program
-pub fn build_instruction(data: &[u8], transaction_signer_pubkey: Pubkey, account_to_create_pubkey: Pubkey, sys_prg_pubkey: Pubkey) -> Instruction {//accounts_pubkeys: &[&Pubkey]) -> Instruction {
+pub fn build_instruction(data: &[u8], tx_sig_pubkey: Pubkey, new_pda_key: Pubkey, sys_prg_pubkey: Pubkey) -> Instruction {
     Instruction {
         program_id: Pubkey::from_str(PROGRAM_ID).unwrap(),
         accounts: Vec::from([
-            AccountMeta::new(transaction_signer_pubkey, true),
-            AccountMeta::new(account_to_create_pubkey, false),
+            AccountMeta::new(tx_sig_pubkey, true),
+            AccountMeta::new(new_pda_key, false),
             AccountMeta::new_readonly(sys_prg_pubkey, false)]),//accounts_pubkeys
         data: data.to_vec(),
     }
 }
 
+pub async fn send_instruction(data: Vec<u8>, client: &RpcClient, tx_sig: Keypair, new_pda_key: Pubkey, sys_prg_pubkey: Pubkey) -> Result<Signature> {
+    let data_slice = data.as_slice();
+    let tx_sig_pubkey = tx_sig.pubkey();
+    // create instruction
+    let ix = build_instruction(&data_slice, tx_sig_pubkey, new_pda_key, sys_prg_pubkey);
+
+    // take a look at purpose of the blockhash:
+    // https://solana.com/docs/core/transactions#recent-blockhash
+    let blockhash = client.get_latest_blockhash().await?;
+
+    // solana tx
+    let mut tx =
+        Transaction::new_with_payer(&[ix], Some(&tx_sig_pubkey));
+    tx.sign(&[&tx_sig], blockhash);
+
+    // let's send it!
+    Ok(client.send_and_confirm_transaction(&tx).await?)
+}
+
+pub async fn read_transaction(client: &RpcClient, sig: Signature) -> Result<EncodedConfirmedTransactionWithStatusMeta> {
+    let config = RpcTransactionConfig {
+        commitment: CommitmentConfig::confirmed().into(),
+        encoding: UiTransactionEncoding::Base64.into(),
+        max_supported_transaction_version: Some(0),
+    };
+
+    Ok(client.get_transaction_with_config(&sig, config).await?)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
 
-    //=============================================Accounts (3)=================================================
+    let args = Args::parse();
+
+    let program_mode: u8;
+
+    if args.mode.is_none() {
+        program_mode = ask_mode_and_close_if_not_correct();
+    }
+    else {
+        program_mode = args.mode.unwrap();
+    }
+
+    let seed: Vec<u8>;
+
+    if args.seed.is_none() {
+        seed = ask_seed_and_close_if_not_correct();
+    }
+    else {
+        seed = Vec::from(args.seed.unwrap().as_bytes());
+    }
+
+    let mut new_size = 0u64;
+
+    match program_mode {
+        0 => {},
+        1 => {
+            if args.size.is_none() {
+                new_size = ask_new_size_and_close_if_not_correct();
+            }
+            else {
+                new_size = args.size.unwrap();
+            }
+        },
+        _ => {
+            println!("Mode isn't supported");
+            process::exit(0);
+        },
+    }
+
+    
+    
     // 1: first account - transaction signer
-    // read keypair, will be used to sign transaction
-    let transaction_signer =  read_keypair_file(Path::new(KEYPAIR_PATH)).unwrap();
-    println!("Account to create public Key: {}", transaction_signer.pubkey());
+    let tx_sig =  read_keypair_file(Path::new(KEYPAIR_PATH)).unwrap();
 
     // 2: 2nd - account to create
     let program_id: &Pubkey = &Pubkey::from_str(PROGRAM_ID)?;
-    let seed_num = 7_u8;
-    let vec = vec![seed_num];
-
-    let seed = "hello_world".as_bytes();
-
-    let (new_pda_key, bump) = Pubkey::find_program_address(&[seed], &program_id);
-
-    println!("new_pda_key: {}", new_pda_key);
-    println!("seed: {:?}", seed);
-    println!("bump: {}", bump);
+    let (new_pda_key, _bump) = Pubkey::find_program_address(&[&*seed], &program_id);
 
     // 3: system_program account
-    let sys_prg_pubkey = Pubkey::from_str(SYSTEM_PRG_PUBKEY).unwrap();
-    println!("System program account public Key: {}", SYSTEM_PRG_PUBKEY);
+    let sys_prg_pubkey = Pubkey::from_str(SYSTEM_PRG_PUBKEY)?;
 
-    //=============================================Accounts (3)=================================================
-
-
-
-
-
+    
+    
     //rpc-client, it will be used to send transaction to solana-validator
     let client = RpcClient::new_with_commitment(
         SOLANA_URL.to_string(),
@@ -81,98 +219,31 @@ async fn main() -> Result<()> {
     );
 
 
+    let mut data = vec![program_mode];
 
+    match program_mode {
+        0 => {
+            data.extend(seed);
+        },
+        1 => {
+            data.extend(new_size.to_le_bytes());
+        },
+        _ => {
+            println!("Mode isn't supported");
+            process::exit(0);
+        },
+    }
 
-
-
-
-
-
-
-
-    // Create account
-    // data
-    // let mut data = vec![0];
-    // data.extend(seed);
-    // let data_slice = data.as_slice();
-    //
-    // // create instruction
-    // let ix = build_instruction(&data_slice, transaction_signer.pubkey(), new_pda_key, sys_prg_pubkey);
-    //
-    // // take a look at purpose of the blockhash:
-    // // https://solana.com/docs/core/transactions#recent-blockhash
-    // let blockhash = client.get_latest_blockhash().await?;
-    //
-    // // solana tx
-    // let mut tx =
-    //     Transaction::new_with_payer(&[ix], Some(&transaction_signer.pubkey()));
-    // tx.sign(&[&transaction_signer], blockhash);
-    //
-    // // let's send it!
-    // let  sig= client.send_and_confirm_transaction(&tx).await?;
-    //
-    // println!("we have done it, solana signature: {}", sig);
-    //
-    // let config = RpcTransactionConfig {
-    //     //commitment: CommitmentConfig::finalized().into(), // так не работает
-    //     commitment: CommitmentConfig::confirmed().into(),
-    //     encoding: UiTransactionEncoding::Base64.into(),
-    //     max_supported_transaction_version: Some(0),
-    // };
-    //
-    // let transaction = client.get_transaction_with_config(&sig, config).await?;
-    //
-    // println!("Transaction data is {:#?}", transaction);
-
-
-
-
-
-
-
-
-
-
-
-
-    // Resize account
-    // data
-    let mut data = vec![1];
-
-    let new_size = 5_u64;
-    let new_size_data_arr = new_size.to_le_bytes();
-
-    data.extend(new_size_data_arr);
-    let data_slice = data.as_slice();
-
-    // create instruction
-    let ix = build_instruction(&data_slice, transaction_signer.pubkey(), new_pda_key, sys_prg_pubkey);
-
-    // take a look at purpose of the blockhash:
-    // https://solana.com/docs/core/transactions#recent-blockhash
-    let blockhash = client.get_latest_blockhash().await?;
-
-    // solana tx
-    let mut tx =
-        Transaction::new_with_payer(&[ix], Some(&transaction_signer.pubkey()));
-    tx.sign(&[&transaction_signer], blockhash);
-
+    
+    
     // let's send it!
-    let  sig= client.send_and_confirm_transaction(&tx).await?;
+    let  sig= send_instruction(data, &client, tx_sig, new_pda_key, sys_prg_pubkey).await?;
 
     println!("we have done it, solana signature: {}", sig);
 
-    let config = RpcTransactionConfig {
-        //commitment: CommitmentConfig::finalized().into(), // так не работает
-        commitment: CommitmentConfig::confirmed().into(),
-        encoding: UiTransactionEncoding::Base64.into(),
-        max_supported_transaction_version: Some(0),
-    };
-
-    let transaction = client.get_transaction_with_config(&sig, config).await?;
+    let transaction = read_transaction(&client, sig).await?;
 
     println!("Transaction data is {:#?}", transaction);
-
 
     Ok(())
 }

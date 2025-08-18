@@ -9,3 +9,4 @@ solana-client = "=2.1.7"
 tokio = "1.46.1"
 anyhow = "1.0.98"
 solana-transaction-status-client-types = "=2.1.7"
+clap = { version = "4.5.45", features = ["derive"] }
