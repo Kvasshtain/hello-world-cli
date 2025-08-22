@@ -1,16 +1,21 @@
-use clap::Parser;
+mod mode_type;
+
+pub(crate) use {clap::Parser, mode_type::ModeType};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 #[command(about = "cli application for the hello-world program", long_about = None) ]
 pub struct Args {
-    /// Program mode (0 - Create account, 1 - Resize account). If not set will be asked
-    #[arg(short, long)]
-    pub mode: Option<u8>,
+    /// Program mode (Create - Create account, Resize - Resize account, Send - Send lamports). If not set will be asked
+    #[arg(long)]
+    pub mode: ModeType, //pub mode: u8,
     /// Seed for PDA. If not set will be asked
-    #[arg(short = 's', long)]
-    pub seed: Option<String>,
-    /// New account size (ignored if mode = 0). If not set will be asked
-    #[arg(short = 'S', long)]
+    #[arg(long)]
+    pub seed: String,
+    /// New account size (ignored if mode = 0).
+    #[arg(long)]
     pub size: Option<u64>,
+    /// Lamports to send.
+    #[arg(long)]
+    pub amount: Option<u64>,
 }
