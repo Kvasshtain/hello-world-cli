@@ -19,7 +19,8 @@ use {
 };
 
 // path to keypair
-const KEYPAIR_PATH: &str = "/home/kvasshtain/.config/solana/id.json";
+//const KEYPAIR_PATH: &str = "/home/kvasshtain/.config/solana/id.json";
+
 // solana is running on local machine
 const SOLANA_URL: &str = "http://localhost:8899";
 // program_id of the "memo" program
@@ -27,12 +28,12 @@ const SOLANA_URL: &str = "http://localhost:8899";
 const PROGRAM_ID: &str = "4fnvoc7wADwtwJ9SRUvL7KpCBTp8qztm5GqjZBFP7GTt";
 
 // create instuction of the memo-program
-pub fn build_ix(data: &[u8], payer: Pubkey, new: Pubkey) -> Instruction {
+pub fn build_ix(data: &[u8], payer: Pubkey, account: Pubkey) -> Instruction {
     Instruction {
         program_id: Pubkey::from_str(PROGRAM_ID).unwrap(),
         accounts: Vec::from([
             AccountMeta::new(payer, true),
-            AccountMeta::new(new, false),
+            AccountMeta::new(account, false),
             AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
         ]), //accounts_pubkeys
         data: data.to_vec(),
@@ -43,11 +44,11 @@ pub async fn send_ix(
     data: Vec<u8>,
     client: &RpcClient,
     payer: Keypair,
-    new: Pubkey,
+    account: Pubkey,
 ) -> Result<Signature> {
     let payer_key = payer.pubkey();
     // create instruction
-    let ix = build_ix(&data.as_slice(), payer_key, new);
+    let ix = build_ix(&data.as_slice(), payer_key, account);
 
     // take a look at purpose of the blockhash:
     // https://solana.com/docs/core/transactions#recent-blockhash
@@ -76,31 +77,31 @@ pub async fn read_transaction(
 }
 
 pub async fn send_tx(args: Args, client: &RpcClient) -> Result<Signature> {
-    let tx_sig = read_keypair_file(Path::new(KEYPAIR_PATH)).unwrap();
+    let tx_sig = read_keypair_file(Path::new(args.keypair_path.as_str())).unwrap();
 
     // 2: 2nd - account to create
     let program_id: &Pubkey = &Pubkey::from_str(PROGRAM_ID)?;
 
-    let seed = args.seed.as_bytes();
-    let (new_pda_key, _bump) = Pubkey::find_program_address(&[&*seed], &program_id);
+    let mut data = vec![args.mode.clone() as u8];
 
-    //let mode = args.mode;
-    let mut data: Vec<u8> = vec![args.mode.clone() as u8];
-
-    match args.mode {
+    let sig = match args.mode {
         ModeType::Create => {
-            data.extend(seed);
+            let seed = args.seed.unwrap();
+            data.extend(seed.as_bytes());
+            let (new, _bump) = Pubkey::find_program_address(&[&*seed.as_bytes()], &program_id);
+            send_ix(data, &client, tx_sig, new).await?
         }
         ModeType::Resize => {
+            let seed = args.seed.unwrap();
             data.extend(args.size.unwrap().to_le_bytes());
+            let (resized, _bump) = Pubkey::find_program_address(&[&*seed.as_bytes()], &program_id);
+            send_ix(data, &client, tx_sig, resized).await?
         }
         ModeType::Send => {
             data.extend(args.amount.unwrap().to_le_bytes());
+            send_ix(data, &client, tx_sig, Pubkey::from_str(args.destination.unwrap().as_str())?).await?
         }
-    }
-
-    // let's send it!
-    let sig = send_ix(data, &client, tx_sig, new_pda_key).await?;
+    };
 
     println!("we have done it, solana signature: {}", sig);
 

@@ -6,16 +6,29 @@ pub(crate) use {clap::Parser, mode_type::ModeType};
 #[command(version, about, long_about = None)]
 #[command(about = "cli application for the hello-world program", long_about = None) ]
 pub struct Args {
-    /// Program mode (Create - Create account, Resize - Resize account, Send - Send lamports). If not set will be asked
+    /// Path to signer keypair file
+    #[arg(long)]
+    pub keypair_path: String, //pub mode: u8,
+    /// Program mode (Create - Create account, Resize - Resize account, Send - Send lamports).
     #[arg(long)]
     pub mode: ModeType, //pub mode: u8,
     /// Seed for PDA. If not set will be asked
     #[arg(long)]
-    pub seed: String,
+    #[arg(long, required_if_eq("mode", "create"))]
+    #[arg(long, required_if_eq("mode", "resize"))]
+    pub seed: Option<String>,
     /// New account size (ignored if mode = 0).
-    #[arg(long)]
+    #[arg(long, required_if_eq("mode", "resize"))]
     pub size: Option<u64>,
+
+
+    // /// Source account Id (From which transfer will be done)
+    // #[arg(long, required_if_eq("mode", "send"))]
+    // pub source: Option<String>,
+    /// Destination account Id (To which transfer will be done)
+    #[arg(long, required_if_eq("mode", "send"))]
+    pub destination: Option<String>,
     /// Lamports to send.
-    #[arg(long)]
+    #[arg(long, required_if_eq("mode", "send"))]
     pub amount: Option<u64>,
 }
