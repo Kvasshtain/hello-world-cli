@@ -1,7 +1,7 @@
 mod program_option;
 
 use {
-    crate::program_option::{Args, ModeType},
+    crate::program_option::{Args, TransactionType},
     anyhow::Result,
     clap::Parser,
     solana_client::{nonblocking::rpc_client::RpcClient, rpc_config::RpcTransactionConfig},
@@ -27,39 +27,59 @@ const SOLANA_URL: &str = "http://localhost:8899";
 // https://github.com/solana-program/memo/blob/37568de8dae6a4e69572a85e8c166910da232b90/program/src/lib.rs#L26
 const PROGRAM_ID: &str = "4fnvoc7wADwtwJ9SRUvL7KpCBTp8qztm5GqjZBFP7GTt";
 
-// create instuction of the memo-program
-pub fn build_ix(data: &[u8], payer: Pubkey, account: Pubkey) -> Instruction {
+pub fn build_ix(data: &[u8], payer: Pubkey, pubkeys: &[&Pubkey]) -> Instruction {
+
+    let mut accounts: Vec<AccountMeta> = pubkeys
+        .iter()
+        .map(|&pubkey| AccountMeta::new(*pubkey, false))
+        .collect();
+
+    accounts.insert(0, AccountMeta::new(payer, true));
+    accounts.push(AccountMeta::new_readonly(solana_sdk::system_program::id(), false));
+
     Instruction {
         program_id: Pubkey::from_str(PROGRAM_ID).unwrap(),
-        accounts: Vec::from([
-            AccountMeta::new(payer, true),
-            AccountMeta::new(account, false),
-            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
-        ]), //accounts_pubkeys
+        accounts,
         data: data.to_vec(),
     }
 }
 
-pub async fn send_ix(
+pub async fn build_tx(
     data: Vec<u8>,
     client: &RpcClient,
     payer: Keypair,
     account: Pubkey,
 ) -> Result<Signature> {
     let payer_key = payer.pubkey();
-    // create instruction
-    let ix = build_ix(&data.as_slice(), payer_key, account);
 
-    // take a look at purpose of the blockhash:
-    // https://solana.com/docs/core/transactions#recent-blockhash
+    let ix = build_ix(&data.as_slice(), payer_key, &[&account]);
+
     let blockhash = client.get_latest_blockhash().await?;
 
-    // solana tx
     let mut tx = Transaction::new_with_payer(&[ix], Some(&payer_key));
 
     tx.sign(&[&payer], blockhash);
 
-    // let's send it!
+    Ok(client.send_and_confirm_transaction(&tx).await?)
+}
+
+pub async fn build_transfer_from_tx(
+    data: Vec<u8>,
+    client: &RpcClient,
+    payer: Keypair,
+    from: Pubkey,
+    to: Pubkey,
+) -> Result<Signature> {
+    let payer_key = payer.pubkey();
+
+    let ix = build_ix(&data.as_slice(), payer_key, &[&from, &to]);
+
+    let blockhash = client.get_latest_blockhash().await?;
+
+    let mut tx = Transaction::new_with_payer(&[ix], Some(&payer_key));
+
+    tx.sign(&[&payer], blockhash);
+
     Ok(client.send_and_confirm_transaction(&tx).await?)
 }
 
@@ -85,25 +105,31 @@ pub async fn send_tx(args: Args, client: &RpcClient) -> Result<Signature> {
     let mut data = vec![args.mode.clone() as u8];
 
     let sig = match args.mode {
-        ModeType::Create => {
+        TransactionType::Create => {
             let seed = args.seed.unwrap();
             data.extend(seed.as_bytes());
             let (new, _bump) = Pubkey::find_program_address(&[&*seed.as_bytes()], &program_id);
-            send_ix(data, &client, tx_sig, new).await?
+            build_tx(data, &client, tx_sig, new).await?
         }
-        ModeType::Resize => {
-            let seed = args.seed.unwrap();
+        TransactionType::Resize => {
             data.extend(args.size.unwrap().to_le_bytes());
-            let (resized, _bump) = Pubkey::find_program_address(&[&*seed.as_bytes()], &program_id);
-            send_ix(data, &client, tx_sig, resized).await?
+            let (resized, _bump) = Pubkey::find_program_address(&[&*args.seed.unwrap().as_bytes()], &program_id);
+            build_tx(data, &client, tx_sig, resized).await?
         }
-        ModeType::Send => {
+        TransactionType::Transfer => {
             data.extend(args.amount.unwrap().to_le_bytes());
-            send_ix(data, &client, tx_sig, Pubkey::from_str(args.destination.unwrap().as_str())?).await?
+            build_tx(data, &client, tx_sig, Pubkey::from_str(args.to.unwrap().as_str())?).await?
+        }
+        TransactionType::TransferFrom => {
+            data.extend(args.amount.unwrap().to_le_bytes());
+            let seed = args.seed.unwrap();
+            data.extend(seed.as_bytes());
+            let (from, _bump) = Pubkey::find_program_address(&[&*seed.as_bytes()], &program_id);
+            build_transfer_from_tx(data, &client, tx_sig, from, Pubkey::from_str(args.to.unwrap().as_str())?).await?
         }
     };
 
-    println!("we have done it, solana signature: {}", sig);
+    println!("job has been done, solana signature: {}", sig);
 
     Ok(sig)
 }
@@ -117,7 +143,6 @@ pub async fn show_tx_data(client: &RpcClient, sig: Signature) -> Result<()> {
 }
 
 pub async fn execute(args: Args) -> Result<()> {
-    //rpc-client, it will be used to send transaction to solana-validator
     let client = RpcClient::new_with_commitment(
         SOLANA_URL.to_string(),
         CommitmentConfig {

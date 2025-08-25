@@ -2,8 +2,9 @@ use clap::ValueEnum;
 
 #[derive(ValueEnum, Clone, Debug)]
 // #[repr(u8)]
-pub enum ModeType {
+pub enum TransactionType {
     Create = 0,
     Resize = 1,
-    Send = 2,
+    Transfer = 2,
+    TransferFrom = 3,
 }
