@@ -7,4 +7,5 @@ pub enum TransactionType {
     Resize = 1,
     Transfer = 2,
     TransferFrom = 3,
+    Allocate = 4,
 }

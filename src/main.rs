@@ -127,6 +127,13 @@ pub async fn send_tx(args: Args, client: &RpcClient) -> Result<Signature> {
             let (from, _bump) = Pubkey::find_program_address(&[&*seed.as_bytes()], &program_id);
             build_transfer_from_tx(data, &client, tx_sig, from, Pubkey::from_str(args.to.unwrap().as_str())?).await?
         }
+        TransactionType::Allocate => {
+            data.extend(args.size.unwrap().to_le_bytes());
+            let seed = args.seed.unwrap();
+            data.extend(seed.as_bytes());
+            let (resized, _bump) = Pubkey::find_program_address(&[&*seed.as_bytes()], &program_id);
+            build_tx(data, &client, tx_sig, resized).await?
+        }
     };
 
     println!("job has been done, solana signature: {}", sig);
